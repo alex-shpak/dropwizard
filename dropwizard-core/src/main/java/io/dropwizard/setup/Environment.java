@@ -9,13 +9,21 @@ import io.dropwizard.jersey.DropwizardResourceConfig;
 import io.dropwizard.jersey.setup.JerseyContainerHolder;
 import io.dropwizard.jersey.setup.JerseyEnvironment;
 import io.dropwizard.jersey.setup.JerseyServletContainer;
+import io.dropwizard.jersey.validation.MutableValidatorFactory;
 import io.dropwizard.jetty.MutableServletContextHandler;
 import io.dropwizard.jetty.setup.ServletEnvironment;
 import io.dropwizard.lifecycle.setup.LifecycleEnvironment;
+import org.glassfish.jersey.server.validation.internal.InjectingConstraintValidatorFactory;
 
 import javax.annotation.Nullable;
+import javax.inject.Inject;
 import javax.servlet.Servlet;
+import javax.validation.ConstraintValidatorFactory;
 import javax.validation.Validator;
+import javax.validation.ValidatorFactory;
+import javax.ws.rs.container.ResourceContext;
+import javax.ws.rs.core.Feature;
+import javax.ws.rs.core.FeatureContext;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -119,6 +127,47 @@ public class Environment {
                        @Nullable ClassLoader classLoader) {
         this(name, objectMapper, validator, metricRegistry, classLoader, new HealthCheckRegistry());
     }
+
+    public Environment(String name,
+                       ObjectMapper objectMapper,
+                       ValidatorFactory validatorFactory,
+                       MetricRegistry metricRegistry,
+                       @Nullable ClassLoader classLoader,
+                       HealthCheckRegistry healthCheckRegistry) {
+        this(name, objectMapper, validatorFactory.getValidator(), metricRegistry, classLoader, healthCheckRegistry);
+
+        ConstraintValidatorFactory constraintValidatorFactory =
+            validatorFactory.getConstraintValidatorFactory();
+
+        if (constraintValidatorFactory instanceof MutableValidatorFactory) {
+            jersey().register(new SetValidatorFactoryFeature(
+                (MutableValidatorFactory) constraintValidatorFactory
+            ));
+        }
+
+    }
+
+    public static class SetValidatorFactoryFeature implements Feature {
+
+        @Inject
+        private ResourceContext context;
+
+        private final MutableValidatorFactory mutableValidatorFactory;
+
+        public SetValidatorFactoryFeature(MutableValidatorFactory mutableValidatorFactory) {
+            this.mutableValidatorFactory = mutableValidatorFactory;
+        }
+
+        @Override
+        public boolean configure(FeatureContext featureContext) {
+            ConstraintValidatorFactory originalFactory =
+                context.getResource(InjectingConstraintValidatorFactory.class);
+
+            mutableValidatorFactory.setValidatorFactory(originalFactory);
+            return true;
+        }
+    }
+
 
     /**
      * Returns the application's {@link JerseyEnvironment}.
